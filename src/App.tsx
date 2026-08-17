@@ -3,6 +3,7 @@ import { TopBar } from './components/TopBar';
 import { HeroSection } from './components/HeroSection';
 import { MusicPillPlayer } from './components/MusicPillPlayer';
 import { PlaylistDrawer } from './components/PlaylistDrawer';
+import { AdminPanel } from './components/AdminPanel';
 import { THEMES, PRESET_PLAYLISTS, DEFAULT_GIFT_CONFIG } from './presets';
 import type { Playlist, Theme, GiftConfig, PlaylistItem, ThemeId } from './types';
 import { YouTubePlayerService } from './services/YouTubePlayer';
@@ -14,21 +15,73 @@ export function App() {
   const LS_GIFT_KEY = 'vibestream_gift_config';
   const LS_CUSTOM_PLAYLISTS_KEY = 'vibestream_custom_playlists';
 
+  // Secret Admin Page Check (#admin or ?admin=true)
+  const [isAdminPage, setIsAdminPage] = useState<boolean>(() => {
+    return (
+      window.location.hash === '#admin' ||
+      window.location.search.includes('admin=true') ||
+      window.location.search.includes('admin')
+    );
+  });
+
+  // Listen to hash change for #admin
+  useEffect(() => {
+    const handleHashChange = () => {
+      setIsAdminPage(
+        window.location.hash === '#admin' ||
+        window.location.search.includes('admin=true') ||
+        window.location.search.includes('admin')
+      );
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // Keyboard shortcut to toggle secret admin (Shift + A)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        setIsAdminPage((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Video Toggle State
   const [showVideoPlayer, setShowVideoPlayer] = useState<boolean>(false);
 
-  // Load persistent state
+  // Load persistent state & parse URL query params if present (e.g. ?to=Simran&msg=...)
   const [currentTheme, setCurrentTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(LS_THEME_KEY);
     return saved && THEMES[saved] ? THEMES[saved] : THEMES.princess;
   });
 
-  const [giftConfig] = useState<GiftConfig>(() => {
+  const [giftConfig, setGiftConfig] = useState<GiftConfig>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlFriend = params.get('to');
+    const urlMsg = params.get('msg');
+    const urlHindi = params.get('hindi');
+    const urlTitle = params.get('title');
+
+    if (urlFriend || urlMsg) {
+      const urlConfig: GiftConfig = {
+        friendName: urlFriend || DEFAULT_GIFT_CONFIG.friendName,
+        tagline: DEFAULT_GIFT_CONFIG.tagline,
+        message: urlMsg || DEFAULT_GIFT_CONFIG.message,
+        customTitle: urlTitle || DEFAULT_GIFT_CONFIG.customTitle,
+        hindiTitle: urlHindi || DEFAULT_GIFT_CONFIG.hindiTitle,
+        isGiftMode: true,
+      };
+      localStorage.setItem(LS_GIFT_KEY, JSON.stringify(urlConfig));
+      return urlConfig;
+    }
+
     const saved = localStorage.getItem(LS_GIFT_KEY);
     return saved ? JSON.parse(saved) : DEFAULT_GIFT_CONFIG;
   });
 
-  const [customPlaylists] = useState<Playlist[]>(() => {
+  const [customPlaylists, setCustomPlaylists] = useState<Playlist[]>(() => {
     const saved = localStorage.getItem(LS_CUSTOM_PLAYLISTS_KEY);
     return saved ? JSON.parse(saved) : [];
   });
@@ -60,6 +113,8 @@ export function App() {
 
   // Initialize YouTube Player Service
   useEffect(() => {
+    if (isAdminPage) return;
+
     const ytService = new YouTubePlayerService('yt-player-host');
     ytServiceRef.current = ytService;
 
@@ -93,7 +148,6 @@ export function App() {
         }
       });
 
-      // Cue initial playlist
       if (currentPlaylist.youtubeListId) {
         ytService.loadPlaylist(currentPlaylist.youtubeListId, 0);
       }
@@ -102,14 +156,31 @@ export function App() {
     return () => {
       ytService.destroy();
     };
-  }, []);
+  }, [isAdminPage]);
 
-  // Theme Handler
+  // Theme & Gift persistence handlers
   const handleSelectTheme = (themeId: ThemeId) => {
     if (THEMES[themeId]) {
       setCurrentTheme(THEMES[themeId]);
       localStorage.setItem(LS_THEME_KEY, themeId);
     }
+  };
+
+  const handleSaveGiftConfig = (newConfig: GiftConfig) => {
+    setGiftConfig(newConfig);
+    localStorage.setItem(LS_GIFT_KEY, JSON.stringify(newConfig));
+  };
+
+  const handleAddPlaylist = (newPlaylist: Playlist) => {
+    const updated = [newPlaylist, ...customPlaylists];
+    setCustomPlaylists(updated);
+    localStorage.setItem(LS_CUSTOM_PLAYLISTS_KEY, JSON.stringify(updated));
+  };
+
+  const handleDeletePlaylist = (playlistId: string) => {
+    const updated = customPlaylists.filter((p) => p.id !== playlistId);
+    setCustomPlaylists(updated);
+    localStorage.setItem(LS_CUSTOM_PLAYLISTS_KEY, JSON.stringify(updated));
   };
 
   const handleSelectPlaylist = (playlist: Playlist) => {
@@ -207,6 +278,24 @@ export function App() {
     }
   };
 
+  // RENDER SECRET ADMIN DASHBOARD PAGE
+  if (isAdminPage) {
+    return (
+      <AdminPanel
+        giftConfig={giftConfig}
+        onSaveGiftConfig={handleSaveGiftConfig}
+        playlists={allPlaylists}
+        onAddPlaylist={handleAddPlaylist}
+        onDeletePlaylist={handleDeletePlaylist}
+        onBackToViewer={() => {
+          window.location.hash = '';
+          setIsAdminPage(false);
+        }}
+      />
+    );
+  }
+
+  // RENDER CLEAN VISITOR MAIN PAGE
   return (
     <div
       className={`min-h-screen w-full bg-gradient-to-b ${currentTheme.bgGradient} transition-all duration-1000 flex flex-col justify-between relative overflow-x-hidden text-white`}
